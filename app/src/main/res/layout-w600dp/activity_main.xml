@@ -494,7 +494,14 @@
                             android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                             android:textColor="?attr/colorPrimary"
                             android:layout_marginBottom="4dp" />
-
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_uhid"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:text="@string/switch_uhid"
+                            android:checked="true"
+                            android:focusable="true"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
                         <com.google.android.material.materialswitch.MaterialSwitch
                             android:id="@+id/switch_sync_rotation"
                             android:layout_width="match_parent"

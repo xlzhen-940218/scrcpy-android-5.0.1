@@ -217,4 +217,14 @@
     <string name="err_gl_init_failed">OpenGL initialization failed: %s</string>
     <string name="err_record_init_failed">Recording initialization failed: %s</string>
 
+    <!-- File Transfer & Keyboard -->
+    <string name="switch_uhid">Mouse &amp; Keyboard Mode (UHID)</string>
+    <string name="msg_physical_keyboard_connected">Physical keyboard connected</string>
+    <string name="menu_file_transfer">File Transfer</string>
+    <string name="menu_keyboard">Keyboard</string>
+    <string name="msg_transferring_file">Transferring: %s</string>
+    <string name="msg_file_transfer_success">Saved to remote: %s</string>
+    <string name="msg_file_transfer_failed">File transfer failed: %s</string>
+    <string name="msg_text_sent">Sent</string>
+
 </resources>

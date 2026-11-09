@@ -218,4 +218,14 @@
     <string name="err_gl_init_failed">OpenGL 初始化失败: %s</string>
     <string name="err_record_init_failed">录制初始化失败: %s</string>
 
+    <!-- File Transfer & Keyboard -->
+    <string name="switch_uhid">鼠标键盘模式（UHID 模式，映射外接键鼠与软键盘）</string>
+    <string name="msg_physical_keyboard_connected">已连接物理键盘</string>
+    <string name="menu_file_transfer">文件传输</string>
+    <string name="menu_keyboard">键盘输入</string>
+    <string name="msg_transferring_file">正在传输: %s</string>
+    <string name="msg_file_transfer_success">已保存到受控端: %s</string>
+    <string name="msg_file_transfer_failed">文件传输失败: %s</string>
+    <string name="msg_text_sent">已发送</string>
+
 </resources>

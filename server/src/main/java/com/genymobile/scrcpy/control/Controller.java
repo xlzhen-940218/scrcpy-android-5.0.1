@@ -396,13 +396,25 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
                     }
                     return true;
                 case ControlMessage.TYPE_UHID_CREATE:
-                    getUhidManager().open(msg.getId(), msg.getVendorId(), msg.getProductId(), msg.getText(), msg.getData());
+                    try {
+                        getUhidManager().open(msg.getId(), msg.getVendorId(), msg.getProductId(), msg.getText(), msg.getData());
+                    } catch (Exception e) {
+                        Ln.e("Failed to open UHID device", e);
+                    }
                     return true;
                 case ControlMessage.TYPE_UHID_INPUT:
-                    getUhidManager().writeInput(msg.getId(), msg.getData());
+                    try {
+                        getUhidManager().writeInput(msg.getId(), msg.getData());
+                    } catch (Exception e) {
+                        Ln.e("Failed to write UHID input", e);
+                    }
                     return true;
                 case ControlMessage.TYPE_UHID_DESTROY:
-                    getUhidManager().close(msg.getId());
+                    try {
+                        getUhidManager().close(msg.getId());
+                    } catch (Exception e) {
+                        Ln.e("Failed to close UHID device", e);
+                    }
                     return true;
                 case ControlMessage.TYPE_OPEN_HARD_KEYBOARD_SETTINGS:
                     openHardKeyboardSettings();
