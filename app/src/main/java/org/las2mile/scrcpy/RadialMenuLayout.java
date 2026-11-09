@@ -157,8 +157,8 @@ public class RadialMenuLayout extends FrameLayout {
 
         fabSizePx = dpToPx(56);
         itemSizePx = dpToPx(44);
-        minRadiusPx = dpToPx(65);
-        maxRadiusPx = dpToPx(146);
+        minRadiusPx = dpToPx(72);
+        maxRadiusPx = dpToPx(150);
 
         initMenuItems();
         setupViews(context);
@@ -349,18 +349,26 @@ public class RadialMenuLayout extends FrameLayout {
 
     /**
      * Requirement 2:
-     * If the tool button is docked near a screen edge, calculate an inward active position
+     * If the tool button is docked near a screen edge or corner, calculate an inward active position
      * shifted away from the edge so the Golden Spiral has plenty of room to fully display.
      */
     private void computeActiveCenter(int screenW, int screenH) {
-        float shiftAmount = dpToPx(95);
+        float edgeThreshold = dpToPx(48);
+        boolean isNearLeft = (dockedCenterX <= edgeThreshold);
+        boolean isNearRight = (dockedCenterX >= screenW - edgeThreshold);
+        float cornerYThreshold = dpToPx(110);
+        boolean isNearTop = (dockedCenterY <= cornerYThreshold);
+        boolean isNearBottom = (dockedCenterY >= screenH - cornerYThreshold);
+        boolean isCorner = (isNearLeft || isNearRight) && (isNearTop || isNearBottom);
 
-        if (dockedCenterX >= screenW - fabSizePx / 2f) {
+        float shiftX = isCorner ? dpToPx(115) : dpToPx(95);
+
+        if (isNearRight) {
             // At right edge -> shift inward to the left
-            activeCenterX = screenW - shiftAmount;
-        } else if (dockedCenterX <= fabSizePx / 2f) {
+            activeCenterX = screenW - shiftX;
+        } else if (isNearLeft) {
             // At left edge -> shift inward to the right
-            activeCenterX = shiftAmount;
+            activeCenterX = shiftX;
         } else {
             // Floating in middle: ensure enough space for golden spiral radius
             float safeMargin = maxRadiusPx + fabSizePx / 2f + dpToPx(8);
@@ -371,39 +379,118 @@ public class RadialMenuLayout extends FrameLayout {
             }
         }
 
-        // Clamp active Y within safe vertical margin
-        float minY = dpToPx(120);
-        float maxY = screenH - dpToPx(120);
-        activeCenterY = Math.max(minY, Math.min(maxY, dockedCenterY));
+        // Shift Y inward if near top or bottom corners
+        if (isCorner) {
+            if (isNearTop) {
+                activeCenterY = dpToPx(125);
+            } else {
+                activeCenterY = screenH - dpToPx(125);
+            }
+        } else {
+            float minY = dpToPx(100);
+            float maxY = screenH - dpToPx(100);
+            activeCenterY = Math.max(minY, Math.min(maxY, dockedCenterY));
+        }
     }
 
     /**
-     * Requirement 2:
+     * Requirement 2 & Issue Fix:
      * Golden Spiral (黄金螺旋) geometry calculation.
-     * Arranges 9 items along a logarithmic spiral curve with increasing radius and angle.
+     * Arranges 9 items along a logarithmic spiral curve with physical distance separation.
+     * - Guarantees center-to-center distance D >= 48dp (visual gap >= 4dp) between EVERY adjacent pair.
+     * - Prevents crowding and eliminates button overlapping so Screenshot & Record can be cleanly clicked.
+     * - In corners, winds along the inward diagonal quadrant into the open screen so no button goes off-screen.
      */
     private void computeGoldenSpiralGeometry(int screenW, int screenH) {
         int n = menuItems.size();
         if (n == 0) return;
 
-        // Base angle points towards screen center
-        float dirX = (screenW / 2f) - activeCenterX;
-        float dirY = (screenH / 2f) - activeCenterY;
-        double baseAngle = Math.atan2(dirY, dirX);
+        float edgeThreshold = dpToPx(48);
+        boolean isNearLeft = (dockedCenterX <= edgeThreshold);
+        boolean isNearRight = (dockedCenterX >= screenW - edgeThreshold);
+        float cornerYThreshold = dpToPx(110);
+        boolean isNearTop = (dockedCenterY <= cornerYThreshold);
+        boolean isNearBottom = (dockedCenterY >= screenH - cornerYThreshold);
+        boolean isCorner = (isNearLeft || isNearRight) && (isNearTop || isNearBottom);
 
-        // Sweep angle: 220 degrees for wide, elegant spiral distribution
-        double spiralSweep = Math.toRadians(220);
-        double startAngle = baseAngle - (spiralSweep / 2.0);
-        double angleStep = spiralSweep / (n - 1);
+        float rStart = isCorner ? dpToPx(70) : dpToPx(72);
+        float rEnd = isCorner ? dpToPx(138) : (isNearLeft || isNearRight ? dpToPx(146) : maxRadiusPx);
+        float targetDistance = isCorner ? dpToPx(48) : dpToPx(50);
+
+        // 1. Calculate radius for each item along the logarithmic curve
+        float[] r = new float[n];
+        for (int i = 0; i < n; i++) {
+            float progress = (float) i / (n - 1);
+            r[i] = rStart + (rEnd - rStart) * (float) Math.pow(progress, 0.85);
+        }
+
+        // 2. Calculate exact angular step between adjacent items using Law of Cosines:
+        //    D^2 = r_i^2 + r_{i+1}^2 - 2 * r_i * r_{i+1} * cos(deltaTheta)
+        double[] deltaThetas = new double[n - 1];
+        double totalSweep = 0;
+        for (int i = 0; i < n - 1; i++) {
+            float rA = r[i];
+            float rB = r[i + 1];
+            float cosVal = (rA * rA + rB * rB - targetDistance * targetDistance) / (2f * rA * rB);
+            cosVal = Math.max(-1f, Math.min(1f, cosVal));
+            deltaThetas[i] = Math.acos(cosVal);
+            totalSweep += deltaThetas[i];
+        }
+
+        // 3. Determine start angle and winding direction based on position
+        double startAngle;
+        double direction = 1.0; // 1 = clockwise, -1 = counter-clockwise
+
+        if (isCorner) {
+            if (isNearRight && isNearTop) {
+                // Top-Right corner: wind from 15 deg to 185 deg (down-left into screen)
+                startAngle = Math.toRadians(15);
+                direction = 1.0;
+            } else if (isNearLeft && isNearTop) {
+                // Top-Left corner: wind from 165 deg down to -5 deg (down-right into screen)
+                startAngle = Math.toRadians(165);
+                direction = -1.0;
+            } else if (isNearRight && isNearBottom) {
+                // Bottom-Right corner: wind from -15 deg down to -185 deg (up-left into screen)
+                startAngle = Math.toRadians(-15);
+                direction = -1.0;
+            } else {
+                // Bottom-Left corner: wind from -165 deg up to 5 deg (up-right into screen)
+                startAngle = Math.toRadians(-165);
+                direction = 1.0;
+            }
+        } else if (isNearRight) {
+            // Right edge: center around 180 deg (pointing left into screen)
+            startAngle = Math.PI - (totalSweep / 2.0);
+            direction = 1.0;
+        } else if (isNearLeft) {
+            // Left edge: center around 0 deg (pointing right into screen)
+            startAngle = - (totalSweep / 2.0);
+            direction = 1.0;
+        } else {
+            // Free floating: point towards screen center
+            float dirX = (screenW / 2f) - activeCenterX;
+            float dirY = (screenH / 2f) - activeCenterY;
+            double baseAngle = Math.atan2(dirY, dirX);
+            startAngle = baseAngle - (totalSweep / 2.0);
+            direction = 1.0;
+        }
+
+        // 4. Compute target positions for each item
+        float itemMargin = itemSizePx / 2f + dpToPx(4);
+        double currentAngle = startAngle;
 
         for (int i = 0; i < n; i++) {
-            double angle = startAngle + i * angleStep;
-            // Radius follows logarithmic/power curve from minRadius to maxRadius
-            float progress = (float) i / (n - 1);
-            float r = minRadiusPx + (maxRadiusPx - minRadiusPx) * (float) Math.pow(progress, 0.85);
+            float tx = (float) (activeCenterX + r[i] * Math.cos(currentAngle));
+            float ty = (float) (activeCenterY + r[i] * Math.sin(currentAngle));
 
-            itemTargetX[i] = (float) (activeCenterX + r * Math.cos(angle));
-            itemTargetY[i] = (float) (activeCenterY + r * Math.sin(angle));
+            // Hard boundary clamping: GUARANTEE that every single item stays fully within screen boundaries!
+            itemTargetX[i] = Math.max(itemMargin, Math.min(screenW - itemMargin, tx));
+            itemTargetY[i] = Math.max(itemMargin, Math.min(screenH - itemMargin, ty));
+
+            if (i < n - 1) {
+                currentAngle += direction * deltaThetas[i];
+            }
         }
     }
 
@@ -687,13 +774,13 @@ public class RadialMenuLayout extends FrameLayout {
     private int findNearestItem(float touchX, float touchY) {
         float distFromFab = (float) Math.hypot(touchX - activeCenterX, touchY - activeCenterY);
 
-        if (distFromFab < dpToPx(30)) {
+        if (distFromFab < dpToPx(32)) {
             return -1; // Center deadzone
         }
 
         int closestIdx = -1;
         float minDist = Float.MAX_VALUE;
-        float hitThreshold = dpToPx(52); // generous hit radius
+        float hitThreshold = dpToPx(38); // generous hit radius without ambiguous overlaps
 
         for (int i = 0; i < itemViews.size(); i++) {
             float ix = itemTargetX[i];
