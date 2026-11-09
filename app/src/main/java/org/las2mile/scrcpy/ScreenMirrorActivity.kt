@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -21,6 +22,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.util.Log
@@ -41,6 +43,10 @@ import android.widget.Toast
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.ConstraintSet
 import org.las2mile.scrcpy.protocol.ControlMessage
+import java.io.File
+import java.io.FileInputStream
+import java.io.InputStream
+import java.net.URLDecoder
 import java.util.Locale
 
 class ScreenMirrorActivity : Activity(),
@@ -661,11 +667,22 @@ class ScreenMirrorActivity : Activity(),
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         try {
             startActivityForResult(intent, REQUEST_CODE_PICK_FILE)
         } catch (e: Exception) {
-            Toast.makeText(this, "无法打开系统文件选择器: ${e.message}", Toast.LENGTH_SHORT).show()
+            try {
+                val fallbackIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivityForResult(fallbackIntent, REQUEST_CODE_PICK_FILE)
+            } catch (e2: Exception) {
+                Toast.makeText(this, "无法打开系统文件选择器: ${e2.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -681,11 +698,107 @@ class ScreenMirrorActivity : Activity(),
                     }
                 } ?: data.data?.let { uris.add(it) }
 
+                // Try taking persistable read permission
+                val takeFlags = (data.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                for (uri in uris) {
+                    try {
+                        contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    } catch (ignored: Exception) {}
+                }
+
                 if (uris.isNotEmpty()) {
                     startTransferFiles(uris)
                 }
             }
         }
+    }
+
+    private fun queryFileInfo(uri: Uri): Pair<String, Long> {
+        var rawName: String? = null
+        var fileSize = 0L
+
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            try {
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (cursor.moveToFirst()) {
+                        if (nameIdx != -1) rawName = cursor.getString(nameIdx)
+                        if (sizeIdx != -1) fileSize = cursor.getLong(sizeIdx)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "query OpenableColumns failed for $uri: ${e.message}")
+            }
+        }
+
+        if (rawName.isNullOrBlank()) {
+            rawName = uri.lastPathSegment
+        }
+
+        if (rawName.isNullOrBlank() && uri.scheme == "file" && uri.path != null) {
+            try {
+                val file = File(uri.path!!)
+                rawName = file.name
+                if (fileSize <= 0L && file.exists()) {
+                    fileSize = file.length()
+                }
+            } catch (ignored: Exception) {}
+        }
+
+        var cleanName = rawName ?: "file_${System.currentTimeMillis()}"
+
+        // Handle URL encoding if present
+        if (cleanName.contains('%')) {
+            try {
+                cleanName = URLDecoder.decode(cleanName, "UTF-8")
+            } catch (ignored: Exception) {}
+        }
+
+        // Strip any provider prefix like "primary:Download/test.apk" or "raw:/..."
+        if (cleanName.contains(':')) {
+            cleanName = cleanName.substringAfterLast(':')
+        }
+
+        // Keep only base file name without directories
+        cleanName = File(cleanName).name
+
+        // Replace illegal filesystem characters for FAT/sdcard (\ / : * ? " < > |)
+        cleanName = cleanName.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
+
+        if (cleanName.isBlank() || cleanName == "." || cleanName == "..") {
+            cleanName = "file_${System.currentTimeMillis()}"
+        }
+
+        return Pair(cleanName, fileSize)
+    }
+
+    private fun openUriInputStream(uri: Uri): InputStream? {
+        try {
+            val stream = contentResolver.openInputStream(uri)
+            if (stream != null) return stream
+        } catch (e: Exception) {
+            Log.w(TAG, "openInputStream failed for $uri: ${e.message}")
+        }
+
+        try {
+            val pfd = contentResolver.openFileDescriptor(uri, "r")
+            if (pfd != null) {
+                return ParcelFileDescriptor.AutoCloseInputStream(pfd)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "openFileDescriptor failed for $uri: ${e.message}")
+        }
+
+        if (uri.scheme == "file" && uri.path != null) {
+            try {
+                return FileInputStream(File(uri.path!!))
+            } catch (e: Exception) {
+                Log.w(TAG, "FileInputStream failed for $uri: ${e.message}")
+            }
+        }
+
+        return null
     }
 
     private fun startTransferFiles(uris: List<Uri>) {
@@ -706,44 +819,43 @@ class ScreenMirrorActivity : Activity(),
             var failCount = 0
             var lastRemotePath = ""
 
-            for (uri in uris) {
-                var fileName = "file_${System.currentTimeMillis()}"
-                var fileSize = 0L
-
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (cursor.moveToFirst()) {
-                        if (nameIdx != -1) fileName = cursor.getString(nameIdx) ?: fileName
-                        if (sizeIdx != -1) fileSize = cursor.getLong(sizeIdx)
-                    }
-                }
-
-                val category = getCategoryFolder(fileName)
-                val remotePath = "/sdcard/Scrcpy/$category/$fileName"
+            for ((index, uri) in uris.withIndex()) {
+                val (cleanName, fileSize) = queryFileInfo(uri)
+                val category = getCategoryFolder(cleanName)
+                val remotePath = "/sdcard/Scrcpy/$category/$cleanName"
                 lastRemotePath = remotePath
 
+                val statusText = if (uris.size > 1) {
+                    "${cleanName} (${index + 1}/${uris.size})"
+                } else {
+                    cleanName
+                }
+
                 runOnUiThread {
-                    progressDialog.setMessage(getString(R.string.msg_transferring_file, fileName))
+                    progressDialog.setMessage(getString(R.string.msg_transferring_file, statusText))
                 }
 
                 try {
-                    val inputStream = contentResolver.openInputStream(uri)
+                    val inputStream = openUriInputStream(uri)
                     if (inputStream != null) {
                         inputStream.use { input ->
+                            Log.i(TAG, "Transferring: $cleanName ($fileSize bytes) -> $remotePath")
                             val success = SendCommands.pushRemoteFile(input, remotePath, fileSize)
                             if (success) {
                                 scrcpy?.scanFile(remotePath)
                                 successCount++
+                                Log.i(TAG, "Transferred successfully: $remotePath")
                             } else {
+                                Log.e(TAG, "SendCommands.pushRemoteFile failed for $remotePath")
                                 failCount++
                             }
                         }
                     } else {
+                        Log.e(TAG, "Cannot open input stream for URI: $uri")
                         failCount++
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "File transfer failed for $fileName", e)
+                    Log.e(TAG, "File transfer exception for $cleanName", e)
                     failCount++
                 }
             }

@@ -497,9 +497,10 @@
                         <com.google.android.material.materialswitch.MaterialSwitch
                             android:id="@+id/switch_uhid"
                             android:layout_width="match_parent"
-                            android:layout_height="48dp"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
                             android:text="@string/switch_uhid"
-                            android:checked="true"
+                            android:checked="false"
                             android:focusable="true"
                             android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
                         <com.google.android.material.materialswitch.MaterialSwitch

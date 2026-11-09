@@ -66,8 +66,25 @@ class SendCommands {
         private val forwardSockets = CopyOnWriteArrayList<Socket>()
         private val forwardStreams = CopyOnWriteArrayList<io.github.muntashirakon.adb.AdbStream>()
 
+        private fun openExecStream(cmd: String): io.github.muntashirakon.adb.AdbStream {
+            val utf8Bytes = cmd.toByteArray(StandardCharsets.UTF_8)
+            // Workaround for libadb-android bug:
+            // AdbProtocol.generateOpen allocates ByteBuffer with size = destination.length() + 1
+            // instead of destination.getBytes(UTF_8).length + 1.
+            // If destination contains multi-byte characters (e.g. Chinese, Unicode),
+            // byte length > char length, causing java.nio.BufferOverflowException.
+            // When multi-byte characters are present, we wrap the command in base64:
+            val destination = if (utf8Bytes.size > cmd.length) {
+                val b64 = Base64.encodeToString(utf8Bytes, Base64.NO_WRAP)
+                "exec:eval \"\$(echo $b64 | (base64 -d 2>/dev/null || toybox base64 -d))\""
+            } else {
+                "exec:$cmd"
+            }
+            return connection.open(destination)
+        }
+
         override fun execute(cmd: String): String {
-            connection.open("exec:$cmd").use { stream ->
+            openExecStream(cmd).use { stream ->
                 stream.openInputStream().use { `in` ->
                     val baos = ByteArrayOutputStream()
                     val buf = ByteArray(4096)
@@ -87,7 +104,7 @@ class SendCommands {
         }
 
         override fun pushFile(data: ByteArray, remotePath: String) {
-            connection.open("exec:cat > $remotePath").use { stream ->
+            openExecStream("cat > " + escapeShellArg(remotePath)).use { stream ->
                 stream.openOutputStream().use { out ->
                     out.write(data)
                     out.flush()
@@ -101,7 +118,7 @@ class SendCommands {
             totalBytes: Long,
             progressListener: ((Long, Long) -> Unit)?
         ) {
-            connection.open("exec:cat > \"$remotePath\"").use { stream ->
+            openExecStream("cat > " + escapeShellArg(remotePath)).use { stream ->
                 stream.openOutputStream().use { out ->
                     val buf = ByteArray(65536)
                     var bytesWritten = 0L
@@ -117,7 +134,7 @@ class SendCommands {
         }
 
         override fun startServerProcess(cmd: String, callback: ServerOutputCallback?) {
-            val stream = connection.open("exec:$cmd")
+            val stream = openExecStream(cmd)
             serverStream = stream
             Thread({
                 try {
@@ -249,7 +266,7 @@ class SendCommands {
         }
 
         override fun pushFile(data: ByteArray, remotePath: String) {
-            connection.open("exec:cat > $remotePath").use { stream ->
+            connection.open("exec:cat > " + escapeShellArg(remotePath)).use { stream ->
                 var offset = 0
                 val chunkSize = 4096
                 while (offset < data.size) {
@@ -268,7 +285,7 @@ class SendCommands {
             totalBytes: Long,
             progressListener: ((Long, Long) -> Unit)?
         ) {
-            connection.open("exec:cat > \"$remotePath\"").use { stream ->
+            connection.open("exec:cat > " + escapeShellArg(remotePath)).use { stream ->
                 val buf = ByteArray(4096)
                 var bytesWritten = 0L
                 var r: Int
@@ -705,23 +722,69 @@ class SendCommands {
         }
 
         @JvmStatic
+        fun escapeShellArg(arg: String): String {
+            return "'" + arg.replace("'", "'\\''") + "'"
+        }
+
+        @JvmStatic
         fun pushRemoteFile(
             inputStream: InputStream,
             remotePath: String,
             totalBytes: Long,
             progressListener: ((Long, Long) -> Unit)? = null
         ): Boolean {
-            val session = activeSession ?: return false
+            val session = activeSession ?: run {
+                Log.e(TAG, "pushRemoteFile: No active ADB session")
+                return false
+            }
             val dir = remotePath.substringBeforeLast('/', "")
+            val tempPath = "/sdcard/Scrcpy/.tmp_${System.currentTimeMillis()}_${(1000..9999).random()}.tmp"
+
+            // 1. Ensure parent /sdcard/Scrcpy directory exists
+            try {
+                session.execute("mkdir -p '/sdcard/Scrcpy'")
+            } catch (ignored: Exception) {}
+
+            // 2. Stream to safe ASCII temporary path first
+            try {
+                session.pushFileStream(inputStream, tempPath, totalBytes, progressListener)
+            } catch (e: Exception) {
+                Log.e(TAG, "pushFileStream failed for $tempPath", e)
+                try { session.execute("rm -f " + escapeShellArg(tempPath)) } catch (ignored: Exception) {}
+                return false
+            }
+
+            // 3. Ensure final target directory exists
             if (dir.isNotEmpty()) {
                 try {
-                    session.execute("mkdir -p \"$dir\"")
-                } catch (ignored: Exception) {}
+                    val mkdirCmd = "mkdir -p " + escapeShellArg(dir)
+                    val res = session.execute(mkdirCmd)
+                    if (res.isNotBlank()) {
+                        Log.d(TAG, "mkdir result: $res")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "mkdir failed: ${e.message}")
+                }
             }
-            session.pushFileStream(inputStream, remotePath, totalBytes, progressListener)
+
+            // 4. Move temporary file to final remotePath
             try {
-                session.execute("chmod 644 \"$remotePath\"")
+                val mvCmd = "mv -f " + escapeShellArg(tempPath) + " " + escapeShellArg(remotePath)
+                val mvRes = session.execute(mvCmd)
+                if (mvRes.isNotBlank()) {
+                    Log.d(TAG, "mv result: $mvRes")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to move $tempPath to $remotePath", e)
+                try { session.execute("rm -f " + escapeShellArg(tempPath)) } catch (ignored: Exception) {}
+                return false
+            }
+
+            // 5. Update permissions
+            try {
+                session.execute("chmod 644 " + escapeShellArg(remotePath))
             } catch (ignored: Exception) {}
+
             return true
         }
 
