@@ -86,11 +86,9 @@ public class ScreenMirrorActivity extends Activity
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Runnable recordTimerRunnable;
     private long recordStartMs = 0;
-    private boolean recordTabDragged = false;
-    private boolean screenshotTabDragged = false;
 
-    // Pull-tab drag threshold in pixels (set in onCreate)
-    private float pullTabThresholdPx = 200f;
+    // Floating Tool Button & Radial Menu
+    private RadialMenuLayout radialMenuLayout;
 
     // ────────────────────────────────────────────────────────────────────────
     // Service connection
@@ -181,19 +179,41 @@ public class ScreenMirrorActivity extends Activity
 
         surfaceView    = findViewById(R.id.decoder_surface);
         containerLayout = findViewById(R.id.container1);
+        radialMenuLayout = findViewById(R.id.radial_menu_layout);
 
-        // Pull-tab threshold: 80dp
-        pullTabThresholdPx = 80 * getResources().getDisplayMetrics().density;
-
-        // Nav bar visibility
-        LinearLayout navBar = findViewById(R.id.nav_button_bar);
-        if (navBar != null) {
-            if (nav && !noControl) {
-                navBar.setVisibility(LinearLayout.VISIBLE);
-                navBar.bringToFront();
-            } else {
-                navBar.setVisibility(LinearLayout.GONE);
-            }
+        if (radialMenuLayout != null) {
+            radialMenuLayout.setVisibility(nav || !noControl ? View.VISIBLE : View.GONE);
+            radialMenuLayout.setOnMenuActionListener(actionId -> {
+                switch (actionId) {
+                    case RadialMenuLayout.ACTION_SCREENSHOT:
+                        captureFullscreenScreenshot();
+                        break;
+                    case RadialMenuLayout.ACTION_RECORD:
+                        handleRecordPullTab();
+                        break;
+                    case RadialMenuLayout.ACTION_POWER:
+                        if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_POWER);
+                        break;
+                    case RadialMenuLayout.ACTION_VOL_UP:
+                        if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_VOLUME_UP);
+                        break;
+                    case RadialMenuLayout.ACTION_VOL_DOWN:
+                        if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_VOLUME_DOWN);
+                        break;
+                    case RadialMenuLayout.ACTION_ROTATE:
+                        if (scrcpy != null) scrcpy.rotateDevice();
+                        break;
+                    case RadialMenuLayout.ACTION_APPS:
+                        if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_APP_SWITCH);
+                        break;
+                    case RadialMenuLayout.ACTION_HOME:
+                        if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_HOME);
+                        break;
+                    case RadialMenuLayout.ACTION_BACK:
+                        if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_BACK);
+                        break;
+                }
+            });
         }
 
         // Use SurfaceHolder callback so we get surface ready event
@@ -379,105 +399,6 @@ public class ScreenMirrorActivity extends Activity
             surfaceView.setOnTouchListener((v, event) ->
                     scrcpy != null && scrcpy.touchevent(event, surfaceView.getWidth(), surfaceView.getHeight()));
         }
-
-        if (nav && !noControl) {
-            View powerBtn   = findViewById(R.id.power_button);
-            View backBtn    = findViewById(R.id.back_button);
-            View homeBtn    = findViewById(R.id.home_button);
-            View switchBtn  = findViewById(R.id.appswitch_button);
-            View volDownBtn = findViewById(R.id.vol_down_button);
-            View volUpBtn   = findViewById(R.id.vol_up_button);
-            View rotateBtn  = findViewById(R.id.rotate_button);
-
-            if (powerBtn   != null) powerBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_POWER); });
-            if (backBtn    != null) backBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_BACK); });
-            if (homeBtn    != null) homeBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_HOME); });
-            if (switchBtn  != null) switchBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_APP_SWITCH); });
-            if (volDownBtn != null) volDownBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_VOLUME_DOWN); });
-            if (volUpBtn   != null) volUpBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.sendKeyevent(KeyEvent.KEYCODE_VOLUME_UP); });
-            if (rotateBtn  != null) rotateBtn.setOnClickListener(v -> { if (scrcpy != null) scrcpy.rotateDevice(); });
-        }
-
-        setupPullTabs();
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    private void setupPullTabs() {
-        // ── Screenshot pull-tab (top-left) ────────────────────────────────
-        View screenshotTab = findViewById(R.id.tab_screenshot);
-        if (screenshotTab != null) {
-            screenshotTab.setOnTouchListener((v, event) -> {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        screenshotTabDragged = false;
-                        // Animate: slightly expand on touch down
-                        v.animate().scaleX(1.08f).scaleY(1.08f).alpha(1.0f).setDuration(120).start();
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        float dx = event.getX();
-                        float dy = event.getY();
-                        // Progress-based scale: grow as user drags toward threshold
-                        float progress = Math.min(1.0f,
-                                Math.max(dx, 0) / pullTabThresholdPx);
-                        v.animate()
-                                .scaleX(1.08f + 0.15f * progress)
-                                .scaleY(1.08f + 0.15f * progress)
-                                .alpha(0.82f + 0.18f * progress)
-                                .setDuration(0).start();
-                        // Trigger when dragged diagonally right-down
-                        if (dx > pullTabThresholdPx && dy > pullTabThresholdPx / 2) {
-                            if (!screenshotTabDragged) {
-                                screenshotTabDragged = true;
-                                captureFullscreenScreenshot();
-                            }
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        screenshotTabDragged = false;
-                        // Animate back to resting state
-                        v.animate().scaleX(1.0f).scaleY(1.0f).alpha(0.82f).setDuration(200).start();
-                        return true;
-                }
-                return false;
-            });
-        }
-
-        // ── Record pull-tab (top-right) ───────────────────────────────────
-        View recordTab = findViewById(R.id.tab_record);
-        if (recordTab != null) {
-            recordTab.setOnTouchListener((v, event) -> {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        recordTabDragged = false;
-                        v.animate().scaleX(1.08f).scaleY(1.08f).alpha(1.0f).setDuration(120).start();
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        float dx = event.getX();
-                        float dy = event.getY();
-                        // dx is negative when dragging left from the right-anchored tab
-                        float prog = Math.min(1.0f, Math.max(-dx, 0) / pullTabThresholdPx);
-                        v.animate()
-                                .scaleX(1.08f + 0.15f * prog)
-                                .scaleY(1.08f + 0.15f * prog)
-                                .alpha(0.82f + 0.18f * prog)
-                                .setDuration(0).start();
-                        if (-dx > pullTabThresholdPx && dy > pullTabThresholdPx / 2) {
-                            if (!recordTabDragged) {
-                                recordTabDragged = true;
-                                handleRecordPullTab();
-                            }
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        recordTabDragged = false;
-                        v.animate().scaleX(1.0f).scaleY(1.0f).alpha(0.82f).setDuration(200).start();
-                        return true;
-                }
-                return false;
-            });
-        }
     }
 
     @Override
@@ -507,6 +428,10 @@ public class ScreenMirrorActivity extends Activity
 
     @Override
     public void onBackPressed() {
+        if (radialMenuLayout != null && radialMenuLayout.isExpanded()) {
+            radialMenuLayout.collapse();
+            return;
+        }
         long now = SystemClock.uptimeMillis();
         if (backTimestamp == 0 || now > backTimestamp + 2000) {
             backTimestamp = now;
@@ -559,10 +484,9 @@ public class ScreenMirrorActivity extends Activity
     private void adjustSurfaceLayout() {
         setupTouchAndNav();
 
-        View navBar = findViewById(R.id.nav_button_bar);
-        if (navBar != null) {
-            navBar.setVisibility(nav && !noControl ? View.VISIBLE : View.GONE);
-            navBar.bringToFront();
+        if (radialMenuLayout != null) {
+            radialMenuLayout.setVisibility(nav || !noControl ? View.VISIBLE : View.GONE);
+            radialMenuLayout.bringToFront();
         }
 
         if (!(containerLayout instanceof ConstraintLayout)) return;
@@ -582,8 +506,8 @@ public class ScreenMirrorActivity extends Activity
         cs.setDimensionRatio(R.id.decoder_surface, ratio);
         cs.applyTo(cl);
 
-        if (navBar != null) {
-            navBar.bringToFront();
+        if (radialMenuLayout != null) {
+            radialMenuLayout.bringToFront();
         }
     }
 
@@ -635,9 +559,10 @@ public class ScreenMirrorActivity extends Activity
         if (isFinishing() || isDestroyed()) return;
         if (screenRecorder.isRecording()) {
             // Confirm stop
+            String msg = getString(R.string.dialog_record_stop_msg) + "\n\n" + getString(R.string.dialog_record_hint_long_press);
             new AlertDialog.Builder(this)
                     .setTitle(R.string.dialog_record_stop_title)
-                    .setMessage(R.string.dialog_record_stop_msg)
+                    .setMessage(msg)
                     .setPositiveButton(R.string.dialog_btn_stop_record, (d, w) -> stopFullscreenRecording())
                     .setNegativeButton(R.string.dialog_btn_continue_record, null)
                     .show();
@@ -714,17 +639,9 @@ public class ScreenMirrorActivity extends Activity
     }
 
     private void updateRecordTabUI(String timerText) {
-        ImageView ivRecord = findViewById(R.id.iv_tab_record);
-        TextView tvTimer   = findViewById(R.id.tv_tab_record_timer);
-        TextView tvHint    = findViewById(R.id.tv_tab_record_hint);
-        boolean recording  = (timerText != null && !timerText.isEmpty());
-
-        if (ivRecord != null) ivRecord.setVisibility(recording ? View.GONE : View.VISIBLE);
-        if (tvTimer  != null) {
-            tvTimer.setVisibility(recording ? View.VISIBLE : View.GONE);
-            if (recording) tvTimer.setText(timerText);
+        boolean recording = (timerText != null && !timerText.isEmpty());
+        if (radialMenuLayout != null) {
+            radialMenuLayout.setRecordingState(recording, timerText);
         }
-        // Keep the hint arrow visible always (it shows ⇙ during idle, still present during recording)
-        if (tvHint != null) tvHint.setVisibility(View.VISIBLE);
     }
 }

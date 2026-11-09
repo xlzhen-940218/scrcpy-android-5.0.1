@@ -209,6 +209,7 @@
     <string name="dialog_record_start_msg">开始录制屏幕内容？录制内容将保存到 Movies/scrcpy 目录。</string>
     <string name="dialog_record_stop_title">停止录制</string>
     <string name="dialog_record_stop_msg">确定停止录制并保存视频到 Movies/scrcpy 目录？</string>
+    <string name="dialog_record_hint_long_press">（提示：如需在录制中进行截屏、旋转等操作，请长按悬浮按钮展开菜单）</string>
     <string name="dialog_btn_start_record">开始录制</string>
     <string name="dialog_btn_stop_record">停止录制</string>
     <string name="dialog_btn_continue_record">继续录制</string>

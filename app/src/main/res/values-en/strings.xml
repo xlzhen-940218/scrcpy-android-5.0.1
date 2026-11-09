@@ -208,6 +208,7 @@
     <string name="dialog_record_start_msg">Start recording screen content? Video will be saved to Movies/scrcpy.</string>
     <string name="dialog_record_stop_title">Stop Recording</string>
     <string name="dialog_record_stop_msg">Stop recording and save video to Movies/scrcpy?</string>
+    <string name="dialog_record_hint_long_press">(Tip: Long-press the floating button to open menu during recording without stopping)</string>
     <string name="dialog_btn_start_record">Start Recording</string>
     <string name="dialog_btn_stop_record">Stop Recording</string>
     <string name="dialog_btn_continue_record">Continue Recording</string>

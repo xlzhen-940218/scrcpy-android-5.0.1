@@ -19,8 +19,17 @@ public final class ControlMessage {
     public static final int TYPE_SET_CLIPBOARD = 9;
     public static final int TYPE_SET_DISPLAY_POWER = 10;
     public static final int TYPE_ROTATE_DEVICE = 11;
-    public static final int TYPE_OPEN_HARD_KEYBOARD_SETTINGS = 12;
+    public static final int TYPE_UHID_CREATE = 12;
+    public static final int TYPE_UHID_INPUT = 13;
+    public static final int TYPE_UHID_DESTROY = 14;
+    public static final int TYPE_OPEN_HARD_KEYBOARD_SETTINGS = 15;
+    public static final int TYPE_START_APP = 16;
     public static final int TYPE_RESET_VIDEO = 17;
+    public static final int TYPE_CAMERA_SET_TORCH = 18;
+    public static final int TYPE_CAMERA_ZOOM_IN = 19;
+    public static final int TYPE_CAMERA_ZOOM_OUT = 20;
+    public static final int TYPE_RESIZE_DISPLAY = 21;
+    public static final int TYPE_SCAN_FILE = 22;
 
     private ControlMessage() {
     }
